@@ -1,0 +1,6 @@
+{
+  "buildCommand": "cd rn-interview-app && npm run build",
+  "devCommand": "cd rn-interview-app && npm run dev",
+  "installCommand": "cd rn-interview-app && npm install",
+  "outputDirectory": "rn-interview-app/.next"
+}
