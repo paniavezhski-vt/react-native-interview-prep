@@ -1,20 +1,35 @@
 {
-  "name": "md-to-pdf-highlighter",
-  "version": "1.0.0",
-  "description": "Convert Markdown to PDF with syntax highlighting",
-  "type": "module",
-  "main": "convert.js",
+  "name": "rn-interview-app",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
-    "convert": "node convert.js",
-    "convert:ru": "node convert.js react-native-interview-prep-2026-ru.md"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
   },
-  "keywords": ["markdown", "pdf", "syntax-highlighting"],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
-    "marked": "^12.0.0",
-    "highlight.js": "^11.9.0",
-    "puppeteer": "^22.0.0",
-    "commander": "^12.0.0"
+    "@types/marked": "^5.0.2",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "framer-motion": "^12.26.2",
+    "gray-matter": "^4.0.3",
+    "highlight.js": "^11.11.1",
+    "lucide-react": "^0.562.0",
+    "marked": "^17.0.1",
+    "next": "16.1.3",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-syntax-highlighter": "^16.1.0",
+    "reactflow": "^11.11.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.3",
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }
