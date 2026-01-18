@@ -8,7 +8,15 @@
       "Bash(python3 -c \"import sys, json; d=json.load\\(sys.stdin\\); print\\(''Sections:'', len\\(d[''ru''][''sections'']\\)\\); print\\(''Questions in first section:'', d[''ru''][''sections''][0][''subsections''][0][''questions''][0][''title''][:50]\\)\")",
       "Bash(file:*)",
       "Bash(node:*)",
-      "mcp__zai-mcp-server__analyze_image"
+      "mcp__zai-mcp-server__analyze_image",
+      "Bash(npm run lint)",
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npm run build:*)",
+      "Bash(git reset:*)",
+      "Bash(git ls-tree:*)"
     ]
   }
 }
