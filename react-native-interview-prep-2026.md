@@ -198,7 +198,15 @@ import { KeyboardAvoidingView, Platform } from 'react-native';
 
 **Q15. 🔴 Explain the Fiber Architecture in React Native.**
 
-Fiber is React's reconciliation algorithm enabling incremental rendering, prioritization, and concurrent features. It breaks rendering into units of work that can be paused, resumed, or aborted. In RN 0.76+, Fiber works with Fabric for efficient native tree updates.
+Fiber is React's completely rewritten reconciliation algorithm, introduced in React 16 and forming the foundation of modern React Native architecture. Unlike the old stack reconciler, which processed rendering synchronously and couldn't be interrupted, Fiber represents an incremental architecture that allows breaking work into small units (fibers).
+
+**Key Fiber Concepts:**
+1. **Work Units**: Each component is represented by a fiber node containing information about the component, its props, state, and connections to other nodes.
+2. **Double Buffering**: Fiber maintains two trees — current (displayed) and workInProgress (being built), allowing atomic switching between them.
+3. **Update Priorities**: Updates are classified by urgency (Immediate, UserBlocking, Normal, Low, Idle), allowing React to process important updates first.
+4. **Interruptibility**: Rendering can be paused to handle higher-priority tasks (e.g., user input), then resumed.
+
+In RN 0.76+, Fiber is tightly integrated with Fabric, the new renderer. When Fiber determines changes in the virtual tree, it passes commands to Fabric for synchronous updates to the native C++ shadow tree, providing faster and more predictable UI rendering.
 
 **Q16. 🔴 What is Concurrent Rendering in React Native?**
 
@@ -291,31 +299,119 @@ function ErrorFallback({ error, resetErrorBoundary }) {
 
 **Q21. 🔴 What is the New Architecture in React Native 0.76+?**
 
-New Architecture consists of Fabric (new rendering system), TurboModules (lazy-loaded native modules), JSI (JavaScript Interface replacing the bridge), and Codegen (type-safe native code generation). It's enabled by default in RN 0.76+ providing 2-3x performance improvements.
+The New Architecture is a fundamental reimagining of React Native's internals, developed by Meta since 2018 and becoming standard in RN 0.76+. It solves the main problem of the old architecture — the asynchronous bridge between JavaScript and native code, which created delays and limited performance.
+
+**Four Pillars of New Architecture:**
+
+1. **JSI (JavaScript Interface)**: A lightweight C++ API allowing JavaScript to directly call native functions without JSON serialization. This is the foundation of the entire architecture, enabling synchronous calls and shared memory.
+
+2. **Fabric**: The new renderer managing UI. The shadow tree is now created in C++ and accessible synchronously from both threads. Supports rendering priorities and concurrent React 18+ features.
+
+3. **TurboModules**: Next-generation native modules with lazy initialization — a module loads only on first use. Type safety is ensured through Codegen.
+
+4. **Codegen**: A tool generating native interfaces (Swift/Kotlin/C++) from TypeScript specifications at build time, eliminating runtime type mismatch errors.
+
+**Practical Benefits:**
+- App startup time reduced by 30-50%
+- Synchronous communication eliminates "jank" during complex interactions
+- Reanimated worklets can execute JS code directly on the UI thread
+- Ability to use C++ for cross-platform business logic
 
 **Q22. 🔴 Explain JSI (JavaScript Interface).**
 
-JSI is a lightweight C++ API allowing JavaScript to directly call native code without JSON serialization. It enables synchronous native calls, shared memory, and direct C++ integration. Foundation for Fabric and TurboModules.
+JSI (JavaScript Interface) is a revolutionary component of the New Architecture, representing a thin C++ abstraction layer over the JavaScript engine. Unlike the old bridge, JSI allows JavaScript code to directly interact with native objects without serialization overhead.
+
+**Key JSI Capabilities:**
+
+1. **Direct Synchronous Calls**: JavaScript can call native functions synchronously, without delays from async bridge transmission. This is critical for animations and gesture handling.
+
+2. **Shared Memory**: Data can be passed by reference, not copied. For example, a TypedArray from JavaScript can directly point to a native memory buffer.
+
+3. **Host Objects**: C++ objects accessible from JavaScript with lazy property evaluation. They don't require pre-serializing all data.
+
+4. **Engine Independence**: JSI abstracts the specific JS engine (Hermes, JavaScriptCore, V8), allowing React Native to work with any of them.
+
+**How JSI Works:**
+- Native code registers Host Objects in the JavaScript runtime
+- JavaScript accesses these objects as regular JS objects
+- When accessing a property/method, corresponding C++ code is called synchronously
+- Result is returned directly, without going through the bridge
 
 ```cpp
 // JSI Host Object example
 class MyModule : public jsi::HostObject {
   jsi::Value get(jsi::Runtime& rt, const jsi::PropNameID& name) override {
     if (name.utf8(rt) == "multiply") {
-      return jsi::Function::createFromHostFunction(/*...*/);
+      return jsi::Function::createFromHostFunction(
+        rt,
+        name,
+        2, // number of arguments
+        [](jsi::Runtime& rt, const jsi::Value& thisVal,
+           const jsi::Value* args, size_t count) -> jsi::Value {
+          double a = args[0].asNumber();
+          double b = args[1].asNumber();
+          return jsi::Value(a * b);
+        });
     }
     return jsi::Value::undefined();
   }
 };
+
+// Usage from JavaScript
+const result = MyModule.multiply(5, 3); // Synchronous call!
 ```
 
 **Q23. 🔴 What is Fabric renderer?**
 
-Fabric is the new rendering system using C++ for the shadow tree, enabling synchronous layout, concurrent rendering support, and better integration with native platforms. It replaces the async bridge-based renderer.
+Fabric is React Native's completely rewritten rendering system, created to work with JSI and React's concurrent features. It replaces the old Paper renderer and solves its fundamental limitations.
+
+**Problems with the Old Renderer (Paper):**
+- Asynchronous bridge communication created delays
+- Shadow tree was managed by a separate Shadow thread, complicating synchronization
+- Couldn't interrupt or prioritize rendering
+- Difficulties measuring elements for animations
+
+**How Fabric Works:**
+
+1. **C++ Shadow Tree**: The shadow tree is now created and managed in C++, accessible synchronously from both JavaScript and native threads. This eliminates the need for async communication for layout operations.
+
+2. **Immutable Tree Diffing**: Fabric creates immutable versions of the tree and efficiently computes differences between them, determining the minimal set of native operations.
+
+3. **Priority Rendering**: Priority support allows urgent updates (user input) to interrupt less important ones (background data loading).
+
+4. **Synchronous Measurements**: JavaScript can synchronously get element sizes and positions, which is critical for animations and Reanimated worklets.
+
+5. **Renderer Interop**: Fabric can work alongside the old Paper renderer, ensuring smooth migration.
 
 **Q24. 🔴 How does Codegen work?**
 
-Codegen generates native interfaces from TypeScript/Flow specs, ensuring type safety between JS and native. It runs at build time, creating Swift/Kotlin/C++ code from your specifications.
+Codegen is an automatic code generation system that creates type-safe native interfaces from TypeScript/Flow specifications. It's a key component of the New Architecture, providing a "contract" between JavaScript and native code.
+
+**Why Codegen is Needed:**
+- In the old architecture, types were only checked at runtime, leading to hard-to-catch bugs
+- Codegen moves type checking to compile time
+- Generated code is optimized without runtime checks
+- Ensures correspondence between JS interface and native implementation
+
+**The Process:**
+
+1. **Writing Specification**: Developer describes the module interface in TypeScript using special types from react-native.
+
+2. **Parsing**: Codegen analyzes the TypeScript AST and extracts information about types, methods, and their signatures.
+
+3. **Generation**: Based on the spec, files are created for each platform:
+   - C++ headers with abstract classes
+   - ObjC++/Swift interfaces for iOS
+   - Java/Kotlin interfaces for Android
+
+4. **Binding**: Developer implements the generated interfaces in native code, and the compiler checks type correspondence.
+
+**Supported Types:**
+- Primitives: `number`, `string`, `boolean`
+- Nullable: `?string`, `string | null`
+- Objects and arrays with typing
+- Promises for async operations
+- Callbacks
 
 ```tsx
 // NativeMyModule.ts
@@ -379,7 +475,26 @@ const useTheme = () => useContext(ThemeContext);
 
 **Q29. 🔴 Explain React's reconciliation algorithm.**
 
-Reconciliation is how React compares trees and determines minimal DOM/native updates. It uses heuristics: different element types produce different trees, keys hint at stable elements. Fiber enables incremental reconciliation with priorities.
+Reconciliation is the process by which React determines which parts of the UI need to be updated when state changes. Since a full comparison of two trees has O(n³) complexity, React uses heuristics that reduce it to O(n).
+
+**Two Key Heuristics:**
+
+1. **Elements of different types produce different trees**: If the root element changed type (e.g., from `<div>` to `<span>` or from `<ComponentA>` to `<ComponentB>`), React completely destroys the old subtree and builds a new one from scratch.
+
+2. **Keys indicate stable elements**: When rendering lists, keys help React understand which element is which, even if the order changed. Without keys, React matches elements by index.
+
+**The Reconciliation Process:**
+
+1. **Comparing Root Elements**: React starts at the root and determines the update type.
+
+2. **DOM Elements of Same Type**: React preserves the node and only updates changed attributes, then recursively processes children.
+
+3. **Components of Same Type**: React updates the instance's props, calls render() and recursively reconciles the result.
+
+4. **Processing Children**: When traversing a list of children, React compares elements pairwise. Keys are critical — they allow React to efficiently reorder elements instead of recreating them.
+
+**Fiber and Reconciliation:**
+With Fiber architecture, reconciliation became incremental — work is broken into units (fibers) that can be paused and resumed. This allows React to prioritize urgent updates (animations, input) over less important ones (background data loading).
 
 **Q30. 🔴 What are render props and when to use them in 2026?**
 
@@ -2301,7 +2416,20 @@ animationRef.current?.reset();
 
 **Q1. 🟢 What are native modules in React Native?**
 
-Native modules expose platform-specific code (Swift/Kotlin/Java) to JavaScript. Used for accessing device APIs, third-party SDKs, or performance-critical operations.
+Native modules are a bridge between your JavaScript application code and native platform capabilities (iOS/Android). They allow using functionality not available through standard React Native APIs.
+
+**When Native Modules Are Needed:**
+- Accessing device-specific APIs: Bluetooth, NFC, sensors, biometrics
+- Integration with third-party native SDKs: payment systems, analytics, maps
+- Performance-critical computations: image processing, cryptography, ML
+- Working with system features: background tasks, push notifications, file system
+
+**Types of Native Modules:**
+1. **Legacy Native Modules**: Use async bridge with JSON serialization. Deprecated approach, but supported for backward compatibility.
+2. **TurboModules (New Architecture)**: Use JSI for synchronous calls, lazy initialization, type-safe through Codegen.
+3. **Fabric Native Components**: For creating custom native UI components (maps, video players, custom views).
+
+In 2026, TurboModules are recommended for new projects as they provide better performance and type safety. Many popular libraries (Reanimated, MMKV, Vision Camera) already use JSI directly.
 
 **Q2. 🟡 What is the difference between TurboModules and legacy native modules?**
 
@@ -2397,7 +2525,25 @@ class MapViewManager: RCTViewManager {
 
 **Q7. 🟡 What is the Fabric renderer?**
 
-Fabric is the new rendering architecture using C++ for shadow tree management. Enables synchronous layout, concurrent rendering, and better native integration.
+Fabric is the new rendering system in React Native that manages creation, updating, and deletion of native views. Unlike the old renderer (Paper), Fabric is completely rewritten to work with JSI.
+
+**Key Differences from Paper:**
+
+| Aspect | Paper (old) | Fabric (new) |
+|--------|-------------|--------------|
+| Shadow tree | JavaScript/Java | C++ |
+| Communication | Async bridge | JSI (synchronous) |
+| Measurements | Asynchronous | Synchronous |
+| Concurrency | Not supported | Full support |
+| Priorities | No | Yes |
+
+**How Fabric Improves Development:**
+- **Synchronous measurements**: Reanimated and Gesture Handler can instantly get element sizes for animations
+- **Concurrent rendering**: React 18+ transitions work natively
+- **Responsive UI**: User input is processed with high priority
+- **Simplified architecture**: One C++ engine instead of three separate threads
+
+Fabric works together with TurboModules — both components use JSI and are part of the New Architecture in RN 0.76+.
 
 **Q8. 🔴 How do you handle threading in native modules?**
 
@@ -2468,16 +2614,56 @@ useEffect(() => {
 
 **Q10. 🔴 What is bridgeless mode in RN 0.76+?**
 
-Bridgeless mode completely removes the async bridge, relying solely on JSI and TurboModules. Enabled by default in New Architecture, providing best performance.
+Bridgeless mode is a React Native operating mode where the classic asynchronous bridge is completely removed. All communication between JavaScript and native code happens through JSI.
+
+**What Changes in Bridgeless Mode:**
+- **No JSON serialization**: Data is passed directly through JSI host objects
+- **Synchronous calls**: Native methods can be called synchronously from JS
+- **Shared memory**: JavaScript and native code can work with the same data buffers
+- **Improved startup**: Modules are initialized lazily on first use
+
+**Practical Implications:**
+1. **Performance**: Native method calls are 10-100x faster
+2. **Animations**: Reanimated worklets get data instantly
+3. **Interop Layer**: Old native modules are automatically wrapped for compatibility
+4. **Simplified debugging**: Fewer async operations — easier to track bugs
+
+**Migration:**
+In RN 0.76+, bridgeless mode is enabled by default. Most popular libraries are already compatible. For legacy modules, the Interop Layer allows them to function without code changes.
 
 **Q11. 🟡 How do you integrate third-party native SDKs?**
 
-Add SDK via CocoaPods/Gradle, create native module wrapper, expose needed methods to JS. Consider existing RN wrappers first.
+Integrating third-party SDKs is a common task in RN app development. The process depends on whether a ready RN wrapper exists and the SDK complexity.
 
+**Step 1: Check for Existing Solutions**
+- Search npm for ready RN libraries for the needed SDK
+- Check compatibility with New Architecture (TurboModules/Fabric)
+- Evaluate repository support activity
+
+**Step 2: If No Ready Wrapper — Create Your Own**
+
+**iOS (CocoaPods):**
 ```ruby
-# Podfile
-pod 'Stripe', '~> 23.0'
+# ios/Podfile
+pod 'ThirdPartySDK', '~> 2.0'
 ```
+
+**Android (Gradle):**
+```groovy
+// android/app/build.gradle
+implementation 'com.thirdparty:sdk:2.0.0'
+```
+
+**Step 3: Create Native Module Wrapper**
+1. Create TurboModule specification (TypeScript)
+2. Implement native code calling SDK methods
+3. Handle SDK callbacks/listeners and convert to JS events
+
+**Recommendations:**
+- Minimize API surface — expose only necessary methods
+- Use Promises for async operations
+- Handle SDK errors and convert to understandable JS exceptions
+- For SDK UI components, create Fabric Native Components
 
 ```swift
 // Native wrapper
@@ -2499,7 +2685,34 @@ class StripeModule: NSObject {
 
 **Q12. 🔴 Explain C++ TurboModules.**
 
-C++ TurboModules share code across iOS/Android. Write once in C++, bind to both platforms. Best for performance-critical, cross-platform native code.
+C++ TurboModules are native modules implemented in C++ that work on both platforms without code duplication. They use JSI directly and provide maximum performance.
+
+**Advantages of C++ TurboModules:**
+- **One code — two platforms**: Business logic is written once in C++
+- **Maximum performance**: No overhead from calls between languages
+- **Direct JSI access**: Can create complex host objects and work with memory directly
+- **Reuse existing C++ libraries**: SQLite, OpenCV, ML models
+
+**When to Use:**
+- Cryptographic operations (hashing, encryption)
+- Image and video processing
+- Machine Learning inference
+- Working with large data volumes
+- Integrating existing C++ SDKs
+
+**Examples of Libraries Using C++ TurboModules:**
+- **react-native-mmkv**: Ultra-fast key-value storage
+- **react-native-reanimated**: Worklets execute in C++
+- **vision-camera**: Frame processors for real-time video processing
+
+**Architecture:**
+```
+JavaScript ←→ JSI ←→ C++ TurboModule ←→ Platform APIs
+                          ↓
+              Shared code for iOS and Android
+```
+
+Developing C++ TurboModules requires knowledge of C++, CMake, and build specifics for each platform, but the results justify the effort for performance-critical tasks.
 
 ```cpp
 // MathModule.h
@@ -2514,7 +2727,29 @@ public:
 
 **Q13. 🟡 What are host objects in JSI?**
 
-Host objects are C++ objects exposed to JavaScript. They can hold native resources and expose methods/properties. Foundation for TurboModules.
+Host Objects are a JSI mechanism that allows creating C++ objects accessible from JavaScript as regular JS objects. This is a fundamental building block for TurboModules and high-performance native libraries.
+
+**How Host Objects Work:**
+- Host Object inherits from `jsi::HostObject` in C++
+- When accessing a property/method from JS, corresponding C++ code is called
+- Properties are evaluated lazily — no need to serialize everything upfront
+- Can contain native resources (file descriptors, sockets, memory)
+
+**Advantages Over the Old Bridge:**
+1. **Lazy evaluation**: Data is requested only when needed
+2. **Synchronous**: Can return values instantly
+3. **Memory management**: Host Object can own native resources and release them on destruction
+4. **Type safety**: Methods can check argument types
+
+**Usage Example:**
+```javascript
+// JS sees host object as a regular object
+const storage = nativeStorage; // Host Object
+storage.set('key', 'value'); // Synchronous C++ call
+const value = storage.get('key'); // Instant result
+```
+
+Host Objects are actively used in react-native-mmkv, Reanimated (shared values), Vision Camera (frame objects), and other high-performance libraries.
 
 **Q14. 🔴 How do you debug native modules?**
 
@@ -2537,7 +2772,34 @@ Log.d("NativeModule", "Processing value: $value")
 
 **Q15. 🟡 What is the ViewManager pattern?**
 
-ViewManager creates and manages native views for React Native. Handles property updates, command execution, and lifecycle.
+ViewManager is a native class responsible for creating and managing custom UI components in React Native. If TurboModules provide functionality (methods), ViewManager provides visual elements.
+
+**Main ViewManager Responsibilities:**
+1. **Creating View**: The `createViewInstance()` method returns a native view instance
+2. **Handling props**: Methods annotated with `@ReactProp` handle property updates from React
+3. **Commands**: Imperative methods called via `ref.current.methodName()`
+4. **Exporting constants**: Static values accessible from JavaScript
+
+**Example Structure (iOS):**
+```swift
+@objc(CustomMapViewManager)
+class CustomMapViewManager: RCTViewManager {
+  override func view() -> UIView! {
+    return CustomMapView()
+  }
+
+  @objc func setRegion(_ view: CustomMapView, region: NSDictionary) {
+    // Handle prop change
+  }
+
+  @objc func animateToRegion(_ reactTag: NSNumber, region: NSDictionary) {
+    // Imperative command
+  }
+}
+```
+
+**Fabric Native Components:**
+In the New Architecture, ViewManager evolved into Fabric Native Components. They use Codegen to generate interfaces and provide synchronous measurements and updates through JSI.
 
 **Q16. 🔴 How do you implement native module callbacks?**
 
@@ -2921,7 +3183,39 @@ test('animates on press', async () => {
 
 **Q14. 🟡 What is the testing pyramid approach for RN?**
 
-Many unit tests (fast, cheap), fewer integration tests, fewest E2E tests (slow, expensive). Typical ratio: 70% unit, 20% integration, 10% E2E.
+The testing pyramid is a strategy for distributing tests by type, optimizing the balance between execution speed, maintenance cost, and code confidence.
+
+**Pyramid Structure for React Native:**
+
+```
+        /\
+       /  \        E2E (Detox/Maestro) — 10%
+      /----\       Slow, brittle, but verify real UX
+     /      \
+    /--------\     Integration — 20%
+   /          \    Components + API + navigation
+  /------------\   Medium speed, medium confidence
+ /              \
+/----------------\  Unit tests — 70%
+                   Fast, isolated, verify logic
+```
+
+**Test Type Characteristics:**
+
+| Type | Speed | Confidence | Maintenance Cost |
+|------|-------|------------|------------------|
+| Unit | Very fast | Low | Low |
+| Integration | Medium | Medium | Medium |
+| E2E | Slow | High | High |
+
+**Practical Recommendations:**
+- **Unit**: All pure functions, hooks, reducers, utilities
+- **Integration**: Screen components with mocked API, navigation flows
+- **E2E**: Critical user paths (login, checkout, core features)
+
+**Anti-patterns:**
+- Ice cream cone (many E2E, few unit tests) — slow CI, brittle tests
+- 100% coverage without meaningful tests — false sense of security
 
 **Q15. 🔴 How do you implement visual regression testing?**
 
@@ -3611,7 +3905,37 @@ export const mediaFacade = {
 
 **Q1. 🟡 What is React Native for Web 0.40+ in 2026?**
 
-React Native for Web renders RN components to web DOM. Near feature parity with mobile, supports New Architecture APIs. Use with Expo for unified codebase.
+React Native for Web is a library that allows running React Native apps in the browser, rendering RN components to DOM elements. In 2026, it's a mature solution for creating truly cross-platform applications.
+
+**How It Works:**
+- `View` → `<div>`
+- `Text` → `<span>` with proper styles
+- `Image` → `<img>` with lazy loading
+- StyleSheet → CSS-in-JS or CSS variables
+
+**Advantages in 2026:**
+- **Near 100% API parity** with mobile platforms
+- **New Architecture support**: Fabric-compatible components work on web
+- **SEO optimization**: SSR with Next.js or Expo Router
+- **Accessibility**: Automatic addition of ARIA attributes
+
+**Integration with Expo:**
+```javascript
+// app.config.js
+export default {
+  expo: {
+    web: {
+      bundler: 'metro', // Unified bundler for all platforms
+      output: 'single', // SPA or 'server' for SSR
+    },
+  },
+};
+```
+
+**Limitations:**
+- Some native modules require web alternatives
+- Reanimated animations work through CSS transitions
+- Gestures via Gesture Handler require pointer events
 
 ```tsx
 // Works on iOS, Android, and Web
@@ -3625,7 +3949,38 @@ React Native for Web renders RN components to web DOM. Near feature parity with 
 
 **Q2. 🔴 What is Tauri integration with React Native?**
 
-Tauri enables lightweight desktop apps. React Native for Web can run inside Tauri for macOS/Windows/Linux with smaller bundles than Electron.
+Tauri is a framework for creating desktop applications that uses the system WebView instead of embedding Chromium (like Electron). This makes applications significantly lighter and faster.
+
+**Tauri + React Native for Web:**
+This combination allows using a single RN codebase for iOS, Android, Web, and Desktop (macOS, Windows, Linux).
+
+**Comparison with Electron:**
+
+| Metric | Tauri | Electron |
+|--------|-------|----------|
+| App size | ~3-10 MB | ~150+ MB |
+| RAM | ~30-50 MB | ~150+ MB |
+| Cold start | Instant | 2-5 seconds |
+| Backend | Rust | Node.js |
+| WebView | System | Chromium |
+
+**Architecture:**
+```
+React Native App
+       ↓
+React Native for Web
+       ↓
+Tauri WebView (system)
+       ↓
+Rust Backend (optional)
+```
+
+**Limitations:**
+- Behavior may differ between WebViews of different OSes
+- No access to some Web APIs (depends on WebView)
+- Requires Rust knowledge for native extensions
+
+**Alternatives:** React Native for Windows/macOS from Microsoft — native rendering without WebView, but a separate codebase.
 
 **Q3. 🟡 How do you implement on-device ML in RN 2026?**
 
@@ -3767,7 +4122,39 @@ supabase
 
 **Q11. 🔴 What is the React Compiler's impact on RN development?**
 
-React Compiler auto-memoizes, reducing manual optimization. Code simpler, fewer bugs, same performance. Enabled via Babel plugin.
+React Compiler (formerly known as React Forget) is a compiler that automatically optimizes React code by adding memoization where needed. This is a revolutionary change in React Native development.
+
+**What React Compiler Does:**
+- Automatically wraps components in `memo()`
+- Adds `useMemo` for expensive computations
+- Creates `useCallback` for callbacks passed to props
+- Analyzes dependencies and adds correct deps arrays
+
+**Before and After:**
+```jsx
+// Before — manual optimization
+const MemoizedList = memo(({ items, onSelect }) => {
+  const sorted = useMemo(() => items.sort(compare), [items]);
+  const handleSelect = useCallback((id) => onSelect(id), [onSelect]);
+  return <FlashList data={sorted} onPress={handleSelect} />;
+});
+
+// After — compiler handles it automatically
+const List = ({ items, onSelect }) => {
+  const sorted = items.sort(compare);
+  const handleSelect = (id) => onSelect(id);
+  return <FlashList data={sorted} onPress={handleSelect} />;
+};
+// Compiler generates optimized code at build time
+```
+
+**Impact on Development:**
+1. **Less cognitive load**: No need to think about memoization
+2. **Fewer bugs**: No forgotten dependencies in `useCallback`
+3. **Cleaner code**: Removes boilerplate wrappers
+4. **Same performance**: Compiler is no worse than manual optimization
+
+**Status in 2026:** React Compiler is in beta for RN 0.76+, enabled via Babel plugin. Recommended for new projects.
 
 **Q12. 🟡 How do you implement biometric authentication?**
 
@@ -3845,7 +4232,41 @@ const schedulePushNotification = async () => {
 
 **Q15. 🔴 What's the future roadmap for React Native in 2026?**
 
-Focus on: complete New Architecture adoption, improved web parity, better static typing with React Compiler, enhanced developer tools, and expanding platform support (visionOS, desktop).
+React Native in 2026 continues to evolve, focusing on performance, cross-platform capability, and developer experience.
+
+**Completed Initiatives:**
+- ✅ New Architecture by default (RN 0.76+)
+- ✅ Hermes as the primary JS engine
+- ✅ Bridgeless mode
+- ✅ React 18+ integration with Concurrent Features
+
+**Active Directions in 2026:**
+
+1. **React Compiler (Forget)**
+   - Automatic memoization
+   - Transition from beta to stable
+   - Deep integration with Metro
+
+2. **Improved Cross-Platform**
+   - React Native for Web — API parity
+   - visionOS (Apple Vision Pro) — experimental support
+   - Improved desktop integration
+
+3. **Developer Tools**
+   - New React Native DevTools (replacing Flipper)
+   - Improved performance profiling
+   - VS Code integration
+
+4. **Styling and UI**
+   - Native CSS variables support
+   - Improved theming and dark mode
+   - Tamagui/NativeWind as recommended solutions
+
+5. **Server Components**
+   - Experimental support via Expo Router
+   - Server Functions for full-stack development
+
+**Development Philosophy:** Meta continues investing in RN, focusing on "write once, run anywhere" while maintaining native performance.
 
 ---
 
